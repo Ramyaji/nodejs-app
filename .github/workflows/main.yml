@@ -1,20 +1,48 @@
-name: CICD
+name: Build, Push to ECR, and Deploy to ECS
 
 on:
   push:
-    branches: [main,master]
-    
+    branches:
+      - main  # Trigger on push to main branch
+
 jobs:
-  build:
-    runs-on: [ubuntu-latest]
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+      ECR_REPOSITORY_NAME: ${{ secrets.ECR_REPOSITORY_NAME }}
+      ECS_CLUSTER_NAME: ${{ secrets.ECS_CLUSTER_NAME }}
+      ECS_SERVICE_NAME: ${{ secrets.ECS_SERVICE_NAME }}
+
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v3
-      - name: Set Node.js 16.x
-        uses: actions/setup-node@v3
-        with:
-          node-version: 16.x
-      - name: Install Dependencies
-        run : npm install
-      - name: Test Project
-        run: npm test
+      # Step 1: Checkout the code
+      - name: Checkout code
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      # Step 3: Log in to Amazon ECR
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v1
+
+      # Step 4: Build the Docker image
+      - name: Build Docker image
+        run: |
+          IMAGE_TAG=$(echo $GITHUB_SHA | cut -c1-7)
+          docker build -t $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:$IMAGE_TAG .
+
+      # Step 5: Push the Docker image to ECR
+      - name: Push Docker image to ECR
+        run: |
+          IMAGE_TAG=$(echo $GITHUB_SHA | cut -c1-7)
+          docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:$IMAGE_TAG
+
+      # Step 6: Update ECS service to use new image
+      - name: Update ECS service
+        run: |
+          IMAGE_TAG=$(echo $GITHUB_SHA | cut -c1-7)
+          aws ecs update-service --cluster $ECS_CLUSTER_NAME --service $ECS_SERVICE_NAME --force-new-deployment --image $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY_NAME:$IMAGE_TAG
+        uses: actions/checkout@v2
+
+      # Step 2: Set up Docker Buildx
